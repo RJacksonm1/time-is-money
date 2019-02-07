@@ -1,6 +1,6 @@
 **time-is-money** translates your expenditures into time-spent (at work) to cover the cost, and shows that information as a card in your Monzo feed.
 
-(Screenshoot)
+![Example screenshot showing a £10 CodeClub donation as 2.19 hours spent](example.png)
 
 # Getting started
 
