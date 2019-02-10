@@ -113,17 +113,28 @@ func webhook(req typhon.Request) typhon.Response {
 		AccessToken: accessToken,
 	}
 
-	err = cl.CreateFeedItem(&monzo.FeedItem{
+	feedItem := monzo.FeedItem{
 		AccountID: transCreatedEv.Data.AccountID,
 		Type:      "basic",
 		URL:       cfg.FeedURL,
 		Title:     fmt.Sprintf("%.2f hours spent", hoursSpent),
 		Body:      fmt.Sprintf("at %s", transCreatedEv.Data.Merchant.Name),
 		ImageURL:  cfg.FeedImageURL,
-	})
+	}
+
+	err = cl.CreateFeedItem(&feedItem)
+	if err != nil && err.Error() == "unauthorized.bad_access_token.expired: Access token has expired" {
+		if err = auth.RefreshClient(&cl); err != nil {
+			log.Print("Failed to refresh client token", err)
+			http.Error(w, "Failed to refresh client token", http.StatusInternalServerError)
+			return res
+		}
+		err = cl.CreateFeedItem(&feedItem)
+	}
+
 	if err != nil {
-		log.Print(err)
-		http.Error(w, "Something went super duper wrong", http.StatusInternalServerError)
+		log.Print("Failed to create feed item", err)
+		http.Error(w, "Failed to create feed item", http.StatusInternalServerError)
 		return res
 	}
 
