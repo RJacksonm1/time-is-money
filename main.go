@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/caarlos0/env"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/monzo/typhon"
 	monzo "github.com/tjvr/go-monzo"
 )
@@ -31,14 +33,12 @@ type config struct {
 
 	PublicBaseURL string `env:"PUBLIC_BASE_URL,required"`
 	Port          int    `env:"PORT" envDefault:"8000"`
+	DataDirectory string `env:"DATA_DIR" envDefault:"."`
 }
 
+var db *sql.DB
 var cfg config
 var auth monzo.Authenticator
-
-// Map of Monzo account IDs to Monzo access tokens!
-// If we ever restart, everybody will have to reauth. Balls.
-var accountAccessTokens map[string]string
 
 func init() {
 	cfg = config{}
@@ -52,8 +52,6 @@ func init() {
 		cfg.MonzoClientSecret,
 		fmt.Sprintf("%s/register", cfg.PublicBaseURL),
 	)
-
-	accountAccessTokens = make(map[string]string)
 }
 
 func webhook(req typhon.Request) typhon.Response {
@@ -101,10 +99,19 @@ func webhook(req typhon.Request) typhon.Response {
 	spent := -(float32(transCreatedEv.Data.Amount) / 100)
 	hoursSpent := spent / disposableHourlyIncome
 
-	accessToken, ok := accountAccessTokens[transCreatedEv.Data.AccountID]
-	if !ok {
-		fmt.Print("No access token for given acconut ID", accountAccessTokens)
-		http.Error(w, "We don't have any users authed for that account ID", http.StatusUnauthorized)
+	err = db.Ping()
+	if err != nil {
+		fmt.Print("Failed to ping database")
+		http.Error(w, "Failed to ping database", http.StatusInternalServerError)
+		return res
+	}
+
+	accountID := transCreatedEv.Data.AccountID
+	var accessToken, refreshToken string
+	err = db.QueryRow("select access_token, refresh_token from account_tokens where account_id = ?", accountID).Scan(&accessToken, &refreshToken)
+	if err != nil {
+		fmt.Printf("No access token for account ID %s; %s", accountID, err)
+		http.Error(w, fmt.Sprintf("No access token for account ID %s; %s", accountID, err), http.StatusUnauthorized)
 		return res
 	}
 
@@ -114,7 +121,7 @@ func webhook(req typhon.Request) typhon.Response {
 	}
 
 	feedItem := monzo.FeedItem{
-		AccountID: transCreatedEv.Data.AccountID,
+		AccountID: accountID,
 		Type:      "basic",
 		URL:       cfg.FeedURL,
 		Title:     fmt.Sprintf("%.2f hours spent", hoursSpent),
@@ -129,6 +136,16 @@ func webhook(req typhon.Request) typhon.Response {
 			http.Error(w, "Failed to refresh client token", http.StatusInternalServerError)
 			return res
 		}
+
+		// Update access tokens now we've refreshed them
+		stmt, _ := db.Prepare("REPLACE INTO account_tokens (account_id, access_token, refresh_token) VALUES(?, ?, ?)")
+		_, err = stmt.Exec(accountID, cl.AccessToken, cl.RefreshToken)
+		if err != nil {
+			log.Print("Failed to save refreshed access tokens", err)
+			http.Error(w, "Something went super duper wrong", http.StatusInternalServerError)
+			return res
+		}
+
 		err = cl.CreateFeedItem(&feedItem)
 	}
 
@@ -181,7 +198,21 @@ func register(req typhon.Request) typhon.Response {
 	}
 
 	for _, account := range accounts {
-		accountAccessTokens[account.ID] = s.Client.AccessToken
+		// Save this user's access tokens against each of their accounts
+		stmt, err := db.Prepare("REPLACE INTO account_tokens (account_id, access_token, refresh_token) VALUES(?, ?, ?)")
+		if err != nil {
+			log.Print("Failed to prepare query to save access tokens", err)
+			http.Error(w, "Something went super duper wrong", http.StatusInternalServerError)
+			return res
+		}
+		_, err = stmt.Exec(account.ID, s.Client.AccessToken, s.Client.RefreshToken)
+		if err != nil {
+			log.Print("Failed to save access tokens", err)
+			http.Error(w, "Something went super duper wrong", http.StatusInternalServerError)
+			return res
+		}
+
+		// Sort out webhooks
 		webhookURL := fmt.Sprintf("%s/webhook", cfg.PublicBaseURL)
 
 		// Unregister any existing hooks for our URL
@@ -228,6 +259,24 @@ func index(req typhon.Request) typhon.Response {
 }
 
 func main() {
+	var err error
+	db, err = sql.Open("sqlite3", fmt.Sprintf("%s/time-is-money.db", cfg.DataDirectory))
+	if err != nil {
+		panic(err)
+	}
+
+	// And make sure we've got somewhere to store access tokens
+	statement, err := db.Prepare(
+		`CREATE TABLE IF NOT EXISTS account_tokens (
+			account_id varchar(255) PRIMARY KEY,
+			access_token varchar(255),
+			refresh_token varchar(255)
+		)`)
+	if err != nil {
+		panic(err)
+	}
+	statement.Exec()
+
 	router := typhon.Router{}
 	router.POST("/webhook", webhook)
 	router.GET("/logout", logout) // Should be a POST but then I have to do HTML forms and whats not; job for another disposableHourlyIncome

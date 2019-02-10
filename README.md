@@ -19,7 +19,7 @@ MONZO_CLIENT_ID=abc123 MONZO_CLIENT_SECRET=123abc PUBLIC_BASE_URL="http://localh
 - Visit `/login` to get everything up & running
 - Spend monaaaay
 
-## Register webhook
+## Configuration
 
 | Environmental variables | Description                                                                                                 | Default                                                                                                   |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
@@ -31,4 +31,5 @@ MONZO_CLIENT_ID=abc123 MONZO_CLIENT_SECRET=123abc PUBLIC_BASE_URL="http://localh
 | `MONTHLY_WORKING_HOURS` | How many hours do you work per month                                                                        | 150 (37.5 hour weeks)                                                                                     |
 | `FEED_URL`              | The URL you're sent when the Monzo feed item is clicked                                                     | https://github.com/RJacksonm1/time-is-money                                                               |
 | `FEED_IMAGE_URL`        | The icon shown alongside the Monzo feed item                                                                | ![](https://emojipedia-us.s3.dualstack.us-west-1.amazonaws.com/thumbs/240/apple/155/alarm-clock_23f0.png) |
-| `PORT`                  | The port to listen for HTTP requests                                                      | 8000                                                                                                      |
+| `PORT`                  | The port to listen for HTTP requests                                                                        | 8000                                                                                                      |
+| `DATA_DIR`              | Directory to store persistant data(sqlite database)                                                         | `./` (local); `/var/lib/time-is-money` (docker)                                                           |
