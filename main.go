@@ -116,8 +116,9 @@ func webhook(req typhon.Request) typhon.Response {
 	}
 
 	cl := monzo.Client{
-		BaseURL:     "https://api.monzo.com",
-		AccessToken: accessToken,
+		BaseURL:      "https://api.monzo.com",
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
 	}
 
 	feedItem := monzo.FeedItem{
@@ -131,8 +132,14 @@ func webhook(req typhon.Request) typhon.Response {
 
 	err = cl.CreateFeedItem(&feedItem)
 	if err != nil && err.Error() == "unauthorized.bad_access_token.expired: Access token has expired" {
-		if err = auth.RefreshClient(&cl); err != nil {
-			log.Print("Failed to refresh client token", err)
+
+		// auth.RefreshClient will send through the expired authorization header, which Monzo's API
+		// gateway/middleware will block before it realises we're trying to refresh
+		cl.AccessToken = ""
+
+		err = auth.RefreshClient(&cl)
+		if err != nil {
+			log.Print("Failed to refresh client token: ", err)
 			http.Error(w, "Failed to refresh client token", http.StatusInternalServerError)
 			return res
 		}
